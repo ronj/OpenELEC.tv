@@ -1,0 +1,127 @@
+diff -crB a/drivers/gpu/drm/i915/i915_reg.h b/drivers/gpu/drm/i915/i915_reg.h
+*** a/drivers/gpu/drm/i915/i915_reg.h	2013-03-15 06:33:22.211911270 +0100
+--- b/drivers/gpu/drm/i915/i915_reg.h	2013-03-15 06:34:27.299908041 +0100
+***************
+*** 2658,2663 ****
+--- 2658,2664 ----
+  #define   PIPECONF_INTERLACED_DBL_ILK		(4 << 21) /* ilk/snb only */
+  #define   PIPECONF_PFIT_PF_INTERLACED_DBL_ILK	(5 << 21) /* ilk/snb only */
+  #define   PIPECONF_CXSR_DOWNCLOCK	(1<<16)
++ #define   PIPECONF_COLOR_RANGE_SELECT   (1<<13)
+  #define   PIPECONF_BPP_MASK	(0x000000e0)
+  #define   PIPECONF_BPP_8	(0<<5)
+  #define   PIPECONF_BPP_10	(1<<5)
+diff -crB a/drivers/gpu/drm/i915/intel_display.c b/drivers/gpu/drm/i915/intel_display.c
+*** a/drivers/gpu/drm/i915/intel_display.c	2013-03-15 06:33:22.211911270 +0100
+--- b/drivers/gpu/drm/i915/intel_display.c	2013-03-15 06:37:08.583904858 +0100
+***************
+*** 4655,4660 ****
+--- 4655,4665 ----
+  	else
+  		val |= PIPECONF_PROGRESSIVE;
+  
++ 	if (adjusted_mode->private_flags & INTEL_MODE_LIMITED_COLOR_RANGE)
++ 		val |= PIPECONF_COLOR_RANGE_SELECT;
++ 	else
++ 		val &= ~PIPECONF_COLOR_RANGE_SELECT;
++ 
+  	I915_WRITE(PIPECONF(pipe), val);
+  	POSTING_READ(PIPECONF(pipe));
+  }
+diff -crB a/drivers/gpu/drm/i915/intel_dp.c b/drivers/gpu/drm/i915/intel_dp.c
+*** a/drivers/gpu/drm/i915/intel_dp.c	2013-03-15 06:33:22.211911270 +0100
+--- b/drivers/gpu/drm/i915/intel_dp.c	2013-03-15 06:41:17.627900040 +0100
+***************
+*** 699,704 ****
+--- 699,707 ----
+  	if (!intel_dp_adjust_dithering(intel_dp, adjusted_mode, true))
+  		return false;
+  
++ 	if (intel_dp->color_range)
++ 		adjusted_mode->private_flags |= INTEL_MODE_LIMITED_COLOR_RANGE;
++ 
+  	bpp = adjusted_mode->private_flags & INTEL_MODE_DP_FORCE_6BPC ? 18 : 24;
+  	mode_rate = intel_dp_link_required(adjusted_mode->clock, bpp);
+  
+***************
+*** 892,898 ****
+  		else
+  			intel_dp->DP |= DP_PLL_FREQ_270MHZ;
+  	} else if (!HAS_PCH_CPT(dev) || is_cpu_edp(intel_dp)) {
+! 		intel_dp->DP |= intel_dp->color_range;
+  
+  		if (adjusted_mode->flags & DRM_MODE_FLAG_PHSYNC)
+  			intel_dp->DP |= DP_SYNC_HS_HIGH;
+--- 895,902 ----
+  		else
+  			intel_dp->DP |= DP_PLL_FREQ_270MHZ;
+  	} else if (!HAS_PCH_CPT(dev) || is_cpu_edp(intel_dp)) {
+! 		if (!HAS_PCH_SPLIT(dev))
+! 			intel_dp->DP |= intel_dp->color_range;
+  
+  		if (adjusted_mode->flags & DRM_MODE_FLAG_PHSYNC)
+  			intel_dp->DP |= DP_SYNC_HS_HIGH;
+diff -crB a/drivers/gpu/drm/i915/intel_drv.h b/drivers/gpu/drm/i915/intel_drv.h
+*** a/drivers/gpu/drm/i915/intel_drv.h	2013-03-15 06:33:22.211911270 +0100
+--- b/drivers/gpu/drm/i915/intel_drv.h	2013-03-15 06:43:20.711897456 +0100
+***************
+*** 108,113 ****
+--- 108,116 ----
+   * timings in the mode to prevent the crtc fixup from overwriting them.
+   * Currently only lvds needs that. */
+  #define INTEL_MODE_CRTC_TIMINGS_SET (0x20)
++ /* Set when limited 16-235 (as opposed to full 0-255) RGB color range is
++  * to be used. */
++ #define INTEL_MODE_LIMITED_COLOR_RANGE (0x40)
+  
+  static inline void
+  intel_mode_set_pixel_multiplier(struct drm_display_mode *mode,
+diff -crB a/drivers/gpu/drm/i915/intel_hdmi.c b/drivers/gpu/drm/i915/intel_hdmi.c
+*** a/drivers/gpu/drm/i915/intel_hdmi.c	2013-03-15 06:33:22.211911270 +0100
+--- b/drivers/gpu/drm/i915/intel_hdmi.c	2013-03-15 06:45:33.267894897 +0100
+***************
+*** 758,763 ****
+--- 758,768 ----
+  				  const struct drm_display_mode *mode,
+  				  struct drm_display_mode *adjusted_mode)
+  {
++ 	struct intel_hdmi *intel_hdmi = enc_to_intel_hdmi(encoder);
++ 
++ 	if (intel_hdmi->color_range)
++ 		adjusted_mode->private_flags |= INTEL_MODE_LIMITED_COLOR_RANGE;
++ 
+  	return true;
+  }
+  
+diff -crB a/drivers/gpu/drm/i915/intel_sdvo.c b/drivers/gpu/drm/i915/intel_sdvo.c
+*** a/drivers/gpu/drm/i915/intel_sdvo.c	2013-03-15 06:33:22.211911270 +0100
+--- b/drivers/gpu/drm/i915/intel_sdvo.c	2013-03-15 06:48:23.343891540 +0100
+***************
+*** 1051,1056 ****
+--- 1051,1059 ----
+  	multiplier = intel_sdvo_get_pixel_multiplier(adjusted_mode);
+  	intel_mode_set_pixel_multiplier(adjusted_mode, multiplier);
+  
++ 	if (intel_sdvo->color_range)
++ 		adjusted_mode->private_flags |= INTEL_MODE_LIMITED_COLOR_RANGE;
++ 
+  	return true;
+  }
+  
+***************
+*** 1140,1146 ****
+  		/* The real mode polarity is set by the SDVO commands, using
+  		 * struct intel_sdvo_dtd. */
+  		sdvox = SDVO_VSYNC_ACTIVE_HIGH | SDVO_HSYNC_ACTIVE_HIGH;
+! 		if (intel_sdvo->is_hdmi)
+  			sdvox |= intel_sdvo->color_range;
+  		if (INTEL_INFO(dev)->gen < 5)
+  			sdvox |= SDVO_BORDER_ENABLE;
+--- 1143,1149 ----
+  		/* The real mode polarity is set by the SDVO commands, using
+  		 * struct intel_sdvo_dtd. */
+  		sdvox = SDVO_VSYNC_ACTIVE_HIGH | SDVO_HSYNC_ACTIVE_HIGH;
+! 		if (!HAS_PCH_SPLIT(dev) && intel_sdvo->is_hdmi)
+  			sdvox |= intel_sdvo->color_range;
+  		if (INTEL_INFO(dev)->gen < 5)
+  			sdvox |= SDVO_BORDER_ENABLE;
